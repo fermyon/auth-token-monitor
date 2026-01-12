@@ -1,4 +1,8 @@
-Monitor GH auth tokens for problems like upcoming expiration
+Monitor auth tokens for problems like upcoming expiration
+
+Currently supported providers:
+ - `github` : [GitHub](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
+ - `fwf` : [Fermyon Wasm Functions](https://www.fermyon.com/wasm-functions)
 
 # Usage
 
