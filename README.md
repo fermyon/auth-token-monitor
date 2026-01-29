@@ -6,6 +6,8 @@ Currently supported providers:
 
 # Usage
 
+## GitHub
+
 ```console
 $ TOKEN=$(gh auth token) github-token-monitor --token-env-vars TOKEN
 Checking "TOKEN"...
@@ -24,6 +26,17 @@ OAuth scopes: read:packages
 
 Error: checks failed for token(s): OLD_TOKEN
 exit status 1
+```
+
+## FwF
+
+Here we assume `TOKEN` in the shell environment holds the value of a FwF auth token,
+e.g. procured via `spin aka auth tokens create --name mytoken`:
+
+```console
+$ ./github-token-monitor --token-env-vars TOKEN --provider fwf
+Checking "TOKEN" with provider "fwf"...
+Token expiration: 2026-02-14 00:04:38.312316 +0000 UTC (15.1 days)
 ```
 
 # Container
