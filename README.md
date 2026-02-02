@@ -1,16 +1,22 @@
-Monitor GH auth tokens for problems like upcoming expiration
+Monitor auth tokens for problems like upcoming expiration
+
+Currently supported providers:
+ - `github` : [GitHub](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
+ - `fwf` : [Fermyon Wasm Functions](https://www.fermyon.com/wasm-functions)
 
 # Usage
 
+## GitHub
+
 ```console
-$ TOKEN=$(gh auth token) github-token-monitor --token-env-vars TOKEN
+$ TOKEN=$(gh auth token) auth-token-monitor --token-env-vars TOKEN
 Checking "TOKEN"...
 Token user login: your-github-username
 Token expiration: NONE
 Rate limit usage: 6 / 5000 (~0%)
 OAuth scopes: gist, read:org, repo, workflow
 
-$ OLD_TOKEN="<some expiring token>" github-token-monitor --token-env-vars OLD_TOKEN
+$ OLD_TOKEN="<some expiring token>" auth-token-monitor --token-env-vars OLD_TOKEN
 Checking "OLD_TOKEN"...
 Token user login: your-github-username
 Token expiration: 2025-07-09 21:27:10 +0000 UTC (9.1 days)
@@ -20,6 +26,17 @@ OAuth scopes: read:packages
 
 Error: checks failed for token(s): OLD_TOKEN
 exit status 1
+```
+
+## FwF
+
+Here we assume `TOKEN` in the shell environment holds the value of a FwF auth token,
+e.g. procured via `spin aka auth tokens create --name mytoken`:
+
+```console
+$ ./auth-token-monitor --token-env-vars TOKEN --provider fwf
+Checking "TOKEN" with provider "fwf"...
+Token expiration: 2026-02-14 00:04:38.312316 +0000 UTC (15.1 days)
 ```
 
 # Container
@@ -37,7 +54,7 @@ jobs:
   test_token_expiration:
     runs-on: ubuntu-latest
     steps:
-      - uses: docker://ghcr.io/fermyon/github-token-monitor:latest
+      - uses: docker://ghcr.io/fermyon/auth-token-monitor:latest
         with:
           args: "--token-env-vars TEST_TOKEN"
         env:

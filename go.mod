@@ -1,4 +1,4 @@
-module github.com/fermyon/github-token-monitor
+module github.com/fermyon/auth-token-monitor
 
 go 1.24.1
 

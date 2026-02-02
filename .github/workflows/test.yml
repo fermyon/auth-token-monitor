@@ -19,18 +19,21 @@ jobs:
       - name: Build
         run: go build
 
-      - name: Check Test Token not expired
+      - name: Check Test Tokens not expired
         env:
-          TEST_TOKEN: ${{ secrets.TEST_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./github-token-monitor --token-env-vars TEST_TOKEN,GITHUB_TOKEN --expiration-threshold=0
+          FERMYBOT_GH_TEST_TOKEN: ${{ secrets.FERMYBOT_GH_TEST_TOKEN }}
+          FERMYBOT_FWF_TEST_TOKEN: ${{ secrets.FERMYBOT_FWF_TEST_TOKEN }}
+        run: |
+          ./auth-token-monitor --token-env-vars FERMYBOT_GH_TEST_TOKEN,GITHUB_TOKEN --expiration-threshold=0
+          ./auth-token-monitor --token-env-vars FERMYBOT_FWF_TEST_TOKEN --expiration-threshold=0 --provider fwf
 
       - name: Check Test Token expiring in next year
         env:
-          TEST_TOKEN: ${{ secrets.TEST_TOKEN }}
+          FERMYBOT_GH_TEST_TOKEN: ${{ secrets.FERMYBOT_GH_TEST_TOKEN }}
         run: |
           set +e
-          ./github-token-monitor --token-env-vars TEST_TOKEN --expiration-threshold=262800h
+          ./auth-token-monitor --token-env-vars FERMYBOT_GH_TEST_TOKEN --expiration-threshold=262800h
           code=$?
           set -e
           if [ "${code}" -ne "1" ]; then
@@ -38,8 +41,11 @@ jobs:
             exit 10
           fi
 
-      - name: Check Test Token not expiring soon (needs to be rotated)
+      - name: Check Test Tokens not expiring soon (need to be rotated)
         continue-on-error: true
         env:
-          TEST_TOKEN: ${{ secrets.TEST_TOKEN }}
-        run: ./github-token-monitor --token-env-vars TEST_TOKEN --expiration-threshold=720h
+          FERMYBOT_GH_TEST_TOKEN: ${{ secrets.FERMYBOT_GH_TEST_TOKEN }}
+          FERMYBOT_FWF_TEST_TOKEN: ${{ secrets.FERMYBOT_FWF_TEST_TOKEN }}
+        run: |
+          ./auth-token-monitor --token-env-vars FERMYBOT_GH_TEST_TOKEN --expiration-threshold=720h
+          ./auth-token-monitor --token-env-vars FERMYBOT_FWF_TEST_TOKEN --expiration-threshold=720h --provider fwf
