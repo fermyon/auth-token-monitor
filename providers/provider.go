@@ -28,4 +28,5 @@ type Provider struct {
 var Providers = map[string]Provider{
 	"github": Github,
 	"fwf":    Fwf,
+	"linode": Linode,
 }

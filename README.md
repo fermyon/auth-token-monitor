@@ -3,6 +3,7 @@ Monitor auth tokens for problems like upcoming expiration
 Currently supported providers:
  - `github` : [GitHub](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
  - `fwf` : [Fermyon Wasm Functions](https://www.fermyon.com/wasm-functions)
+ - `linode` : [Linode](https://techdocs.akamai.com/linode-api/reference/get-personal-access-tokens)
 
 # Usage
 
@@ -37,6 +38,26 @@ e.g. procured via `spin aka auth tokens create --name mytoken`:
 $ ./auth-token-monitor --token-env-vars TOKEN --provider fwf
 Checking "TOKEN" with provider "fwf"...
 Token expiration: 2026-02-14 00:04:38.312316 +0000 UTC (15.1 days)
+```
+
+## Linode
+
+The Linode provider uses the [linodego](https://github.com/linode/linodego) SDK
+to call the [List Personal Access Tokens](https://techdocs.akamai.com/linode-api/reference/get-personal-access-tokens)
+API. It checks the expiration of all tokens returned by the API, not just the
+token used to authenticate.
+
+```console
+$ LINODE_TOKEN="<your linode personal access token>" auth-token-monitor --provider linode --token-env-vars LINODE_TOKEN
+Checking "LINODE_TOKEN" with provider "linode"...
+Found 3 Linode personal access token(s)
+  [my-cli-token] (id=123456): expiration: 2026-03-15T00:00:00Z (33.9 days)
+  [ci-deploy-token] (id=123457): expiration: 2026-02-12T00:00:00Z (3.1 days)
+  WARNING: Token "ci-deploy-token" expiring soon!
+  [long-lived-token] (id=123458): expiration: NEVER
+
+Error: checks failed for token(s): ci-deploy-token
+exit status 1
 ```
 
 # Container

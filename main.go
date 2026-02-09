@@ -18,12 +18,14 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
+	"github.com/linode/linodego"
 	"go.opentelemetry.io/contrib/exporters/autoexport"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	sdkTrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/oauth2"
 
 	"github.com/fermyon/auth-token-monitor/providers"
 )
@@ -42,7 +44,7 @@ var flags struct {
 
 	BaseURL             *url.URL           `name:"base-url" help:"Token API base URL (overrides provider default)"`
 	ExpirationThreshold time.Duration      `name:"expiration-threshold" default:"360h" help:"Minimum duration until token expiration"`
-	Provider            providers.Provider `name:"provider" type:"" default:"github" help:"Auth Token provider ('github' or 'fwf')" `
+	Provider            providers.Provider `name:"provider" type:"" default:"github" help:"Auth Token provider ('github', 'fwf', or 'linode')" `
 }
 
 func main() {
@@ -146,15 +148,29 @@ func checkTokens(ctx context.Context) (err error) {
 	}
 
 	unhappyTokens := failedChecksError{}
-	for name, token := range tokens {
-		happy, err := checkToken(ctx, name, token)
-		if err != nil {
-			log.Printf("Failed checking token %q: %v", name, err)
+
+	if flags.Provider == providers.Linode {
+		for name, token := range tokens {
+			unhappy, err := checkLinodeTokens(ctx, name, token)
+			if err != nil {
+				log.Printf("Failed checking token %q: %v", name, err)
+				unhappyTokens = append(unhappyTokens, name)
+			} else {
+				unhappyTokens = append(unhappyTokens, unhappy...)
+			}
 		}
-		if !happy {
-			unhappyTokens = append(unhappyTokens, name)
+	} else {
+		for name, token := range tokens {
+			happy, err := checkToken(ctx, name, token)
+			if err != nil {
+				log.Printf("Failed checking token %q: %v", name, err)
+			}
+			if !happy {
+				unhappyTokens = append(unhappyTokens, name)
+			}
 		}
 	}
+
 	if len(unhappyTokens) > 0 {
 		return unhappyTokens
 	}
@@ -254,6 +270,66 @@ func checkToken(ctx context.Context, name, token string) (happy bool, err error)
 		fmt.Printf("OAuth scopes: %s\n\n", oAuthScopes)
 	}
 	return happy, nil
+}
+
+func checkLinodeTokens(ctx context.Context, name, token string) (unhappyTokens []string, err error) {
+	ctx, span := otel.Tracer("").Start(ctx, "check-linode "+name)
+	defer func() {
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+	span.SetAttributes(attribute.String("tokmon.token.name", name))
+
+	fmt.Printf("Checking %q with provider %q...\n", name, flags.Provider.Name)
+
+	// Create a linodego client using the token
+	tokenSource := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
+	oauthClient := oauth2.NewClient(ctx, tokenSource)
+	client := linodego.NewClient(oauthClient)
+	if flags.Provider.BaseURL != nil {
+		client.SetBaseURL(flags.Provider.BaseURL.String())
+	}
+
+	// List all personal access tokens visible to this token
+	linodeTokens, err := client.ListTokens(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("listing Linode tokens: %w", err)
+	}
+
+	fmt.Printf("Found %d Linode personal access token(s)\n", len(linodeTokens))
+	span.SetAttributes(attribute.Int("tokmon.linode.token_count", len(linodeTokens)))
+
+	for _, lt := range linodeTokens {
+		label := lt.Label
+		if label == "" {
+			label = fmt.Sprintf("token-%d", lt.ID)
+		}
+		span.AddEvent("check_linode_token", trace.WithAttributes(
+			attribute.String("tokmon.linode.token_label", label),
+			attribute.Int("tokmon.linode.token_id", lt.ID),
+		))
+
+		if lt.Expiry == nil {
+			fmt.Printf("  [%s] (id=%d): expiration: NEVER\n", label, lt.ID)
+			continue
+		}
+
+		expiration := *lt.Expiry
+		expirationDuration := time.Until(expiration)
+		fmt.Printf("  [%s] (id=%d): expiration: %s (%.1f days)\n",
+			label, lt.ID, expiration.Format(time.RFC3339), expirationDuration.Hours()/24)
+
+		if expirationDuration < flags.ExpirationThreshold {
+			fmt.Printf("  WARNING: Token %q expiring soon!\n", label)
+			unhappyTokens = append(unhappyTokens, label)
+			span.SetStatus(codes.Error, fmt.Sprintf("linode token %q expiring soon", label))
+		}
+	}
+
+	fmt.Println()
+	return unhappyTokens, nil
 }
 
 func request(ctx context.Context, url, token string) (resp *http.Response, body []byte, err error) {
