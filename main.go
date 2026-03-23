@@ -117,6 +117,9 @@ func checkTokens(ctx context.Context) (err error) {
 		}
 		for _, entry := range entries {
 			path := path.Join(flags.TokensDir, entry.Name())
+			if fi, err := os.Stat(path); err == nil && fi.IsDir() {
+				continue
+			}
 			byteContents, err := os.ReadFile(path)
 			if err != nil {
 				return fmt.Errorf("reading %q: %w", path, err)
