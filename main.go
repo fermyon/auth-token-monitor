@@ -1,51 +1,28 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"maps"
-	"net/http"
-	"net/url"
 	"os"
 	"path"
 	"slices"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/alecthomas/kong"
-	"github.com/linode/linodego"
 	"go.opentelemetry.io/contrib/exporters/autoexport"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	sdkTrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/trace"
-	"golang.org/x/oauth2"
 
+	"github.com/fermyon/auth-token-monitor/config"
 	"github.com/fermyon/auth-token-monitor/providers"
 )
 
-var timestampLayouts = []string{
-	// Sometimes Github returns an abbreviated timezone name, sometimes a numeric offset 🙄
-	"2006-01-02 15:04:05 MST",
-	"2006-01-02 15:04:05 -0700",
-	// This is the current layout for FwF
-	"2006-01-02 15:04:05.999999 -0700 MST",
-}
-
-var flags struct {
-	TokenEnvVars []string `name:"token-env-vars" help:"Comma-separated list of token env var(s)"`
-	TokensDir    string   `name:"tokens-dir" help:"Directory containing mounted secret tokens"`
-
-	BaseURL             *url.URL           `name:"base-url" help:"Token API base URL (overrides provider default)"`
-	ExpirationThreshold time.Duration      `name:"expiration-threshold" default:"360h" help:"Minimum duration until token expiration"`
-	Provider            providers.Provider `name:"provider" type:"" default:"github" help:"Auth Token provider ('github', 'fwf', or 'linode')" `
-}
+var flags config.Config
 
 func main() {
 	err := run()
@@ -58,8 +35,8 @@ func main() {
 func run() error {
 	kong.Parse(&flags)
 
-	if flags.BaseURL != nil {
-		flags.Provider.BaseURL = flags.BaseURL
+	if flags.Provider != "" {
+		fmt.Fprintf(os.Stderr, "Warning: --provider is deprecated and will be ignored. The auth provider is now auto-detected for each token.\n")
 	}
 
 	ctx := context.Background()
@@ -95,7 +72,6 @@ func checkTokens(ctx context.Context) (err error) {
 		span.End()
 	}()
 	span.SetAttributes(
-		attribute.Stringer("tokmon.base_url", flags.Provider.BaseURL),
 		attribute.Float64("tokmon.expiration_threshold", flags.ExpirationThreshold.Seconds()))
 
 	tokens := map[string]string{}
@@ -151,26 +127,13 @@ func checkTokens(ctx context.Context) (err error) {
 	}
 
 	unhappyTokens := failedChecksError{}
-
-	if flags.Provider == providers.Linode {
-		for name, token := range tokens {
-			unhappy, err := checkLinodeTokens(ctx, name, token)
-			if err != nil {
-				log.Printf("Failed checking token %q: %v", name, err)
-				unhappyTokens = append(unhappyTokens, name)
-			} else {
-				unhappyTokens = append(unhappyTokens, unhappy...)
-			}
-		}
-	} else {
-		for name, token := range tokens {
-			happy, err := checkToken(ctx, name, token)
-			if err != nil {
-				log.Printf("Failed checking token %q: %v", name, err)
-			}
-			if !happy {
-				unhappyTokens = append(unhappyTokens, name)
-			}
+	for name, token := range tokens {
+		unhappy, err := checkTokensByPattern(ctx, name, token)
+		if err != nil {
+			log.Printf("Failed checking token by pattern %q: %v", name, err)
+			unhappyTokens = append(unhappyTokens, name)
+		} else {
+			unhappyTokens = append(unhappyTokens, unhappy...)
 		}
 	}
 
@@ -180,206 +143,15 @@ func checkTokens(ctx context.Context) (err error) {
 	return nil
 }
 
-func checkToken(ctx context.Context, name, token string) (happy bool, err error) {
-	ctx, span := otel.Tracer("").Start(ctx, "check "+name)
-	defer func() {
-		if err != nil {
-			span.SetStatus(codes.Error, err.Error())
-		}
-		span.End()
-	}()
-	span.SetAttributes(attribute.String("tokmon.token.name", name))
-
-	fmt.Printf("Checking %q with provider %q...\n", name, flags.Provider.Name)
-
-	// Make request to check token
-	url := flags.Provider.BaseURL.JoinPath(flags.Provider.Path).String()
-	resp, _, err := request(ctx, url, token)
-	if err != nil {
-		return false, fmt.Errorf("checking token via url %s: %w", url, err)
-	}
-
-	// Get user info (if permitted)
-	// TODO: Currently only valid with GitHub; request support in FwF as well?
-	userURL := flags.Provider.BaseURL.JoinPath("user").String()
-	_, userJSON, err := request(ctx, userURL, token)
-	if err == nil {
-		// Parse user login
-		var user struct {
-			Login string `json:"login"`
-		}
-		err = json.Unmarshal(userJSON, &user)
-		if err != nil {
-			return false, fmt.Errorf("deserializing user: %w", err)
-		}
-		span.SetAttributes(attribute.String("tokmon.token.login", user.Login))
-		fmt.Printf("Token user login: %s\n", user.Login)
-	}
-
-	happy = true
-
-	// Check token expiration
-	expirationValue := resp.Header.Get(flags.Provider.AuthHeader)
-	if expirationValue == "" {
-		fmt.Println("Token expiration: NONE")
-	} else {
-		span.SetAttributes(attribute.String("tokmon.token.expiration", expirationValue))
-
-		// Parse expiration timestamp
-		var expiration time.Time
-		var err error
-		for _, layout := range timestampLayouts {
-			expiration, err = time.Parse(layout, expirationValue)
-			if err == nil {
-				break
+func checkTokensByPattern(ctx context.Context, name, token string) (unhappyTokens []string, err error) {
+	for _, provider := range providers.Providers {
+		for _, pattern := range provider.GetPatterns() {
+			if pattern.MatchString(token) {
+				return provider.CheckToken(ctx, &flags, name, token)
 			}
 		}
-		if err != nil {
-			return false, fmt.Errorf("invalid expiration header value %q: %w", expirationValue, err)
-		}
-		fmt.Printf("Token expiration: %s", expiration)
-
-		// Calculate time until expiration
-		expirationDuration := time.Until(expiration)
-		span.SetAttributes(attribute.Float64("tokmon.token.expiration_duration", expirationDuration.Seconds()))
-		fmt.Printf(" (%.1f days)\n", expirationDuration.Hours()/24)
-		if expirationDuration < flags.ExpirationThreshold {
-			fmt.Println("WARNING: Expiring soon!")
-			happy = false
-			span.SetStatus(codes.Error, "token expiring soon")
-		}
-
 	}
-
-	// Check rate limit usage
-	rateLimitLimit, _ := strconv.Atoi(resp.Header.Get("x-ratelimit-limit"))
-	if rateLimitLimit != 0 {
-		rateLimitUsed, _ := strconv.Atoi(resp.Header.Get("x-ratelimit-used"))
-		fmt.Printf("Rate limit usage: %d / %d", rateLimitUsed, rateLimitLimit)
-
-		rateLimitPercent := rateLimitUsed * 100 / rateLimitLimit
-		fmt.Printf(" (~%d%%)\n", rateLimitPercent)
-		if rateLimitPercent > 50 {
-			fmt.Println("WARNING: Rate limit >50%!")
-			span.SetStatus(codes.Error, "high rate limit usage")
-			happy = false
-		}
-	}
-
-	// Get GitHub token permissions (sometimes helpful when rotating)
-	if flags.Provider == providers.Github {
-		oAuthScopes := resp.Header.Get("x-oauth-scopes")
-		span.SetAttributes(attribute.String("tokmon.token.oauth_scopes", oAuthScopes))
-		fmt.Printf("OAuth scopes: %s\n\n", oAuthScopes)
-	}
-	return happy, nil
-}
-
-func checkLinodeTokens(ctx context.Context, name, token string) (unhappyTokens []string, err error) {
-	ctx, span := otel.Tracer("").Start(ctx, "check-linode "+name)
-	defer func() {
-		if err != nil {
-			span.SetStatus(codes.Error, err.Error())
-		}
-		span.End()
-	}()
-	span.SetAttributes(attribute.String("tokmon.token.name", name))
-
-	fmt.Printf("Checking %q with provider %q...\n", name, flags.Provider.Name)
-
-	// Create a linodego client using the token
-	tokenSource := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	oauthClient := oauth2.NewClient(ctx, tokenSource)
-	client := linodego.NewClient(oauthClient)
-	if flags.Provider.BaseURL != nil {
-		client.SetBaseURL(flags.Provider.BaseURL.String())
-	}
-
-	// List all personal access tokens visible to this token
-	linodeTokens, err := client.ListTokens(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("listing Linode tokens: %w", err)
-	}
-
-	fmt.Printf("Found %d Linode personal access token(s)\n", len(linodeTokens))
-	span.SetAttributes(attribute.Int("tokmon.linode.token_count", len(linodeTokens)))
-
-	for _, lt := range linodeTokens {
-		label := lt.Label
-		if label == "" {
-			label = fmt.Sprintf("token-%d", lt.ID)
-		}
-		span.AddEvent("check_linode_token", trace.WithAttributes(
-			attribute.String("tokmon.linode.token_label", label),
-			attribute.Int("tokmon.linode.token_id", lt.ID),
-		))
-
-		if lt.Expiry == nil {
-			fmt.Printf("  [%s] (id=%d): expiration: NEVER\n", label, lt.ID)
-			continue
-		}
-
-		expiration := *lt.Expiry
-		expirationDuration := time.Until(expiration)
-		fmt.Printf("  [%s] (id=%d): expiration: %s (%.1f days)\n",
-			label, lt.ID, expiration.Format(time.RFC3339), expirationDuration.Hours()/24)
-
-		if expirationDuration < flags.ExpirationThreshold {
-			fmt.Printf("  WARNING: Token %q expiring soon!\n", label)
-			unhappyTokens = append(unhappyTokens, label)
-			span.SetStatus(codes.Error, fmt.Sprintf("linode token %q expiring soon", label))
-		}
-	}
-
-	fmt.Println()
-	return unhappyTokens, nil
-}
-
-func request(ctx context.Context, url, token string) (resp *http.Response, body []byte, err error) {
-	ctx, span := otel.Tracer("").Start(ctx, url)
-	defer func() {
-		if err != nil {
-			span.SetStatus(codes.Error, err.Error())
-		}
-		span.End()
-	}()
-
-	var req *http.Request
-	switch flags.Provider {
-	case providers.Fwf:
-		body := []byte(`{}`)
-		req, err = http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
-		if err != nil {
-			return nil, nil, fmt.Errorf("new request: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-	default:
-		req, err = http.NewRequestWithContext(ctx, "GET", url, nil)
-		if err != nil {
-			return nil, nil, fmt.Errorf("new request: %w", err)
-		}
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-
-	resp, err = http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, nil, fmt.Errorf("do request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err = io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, nil, fmt.Errorf("reading body: %w", err)
-	}
-
-	if resp.StatusCode != flags.Provider.ExpectedStatusCode {
-		if len(body) > 1024 {
-			body = body[:1024]
-		}
-		trace.SpanFromContext(ctx).SetAttributes(attribute.String("tokmon.error_body", strconv.QuoteToASCII(string(body))))
-		return nil, nil, fmt.Errorf("got status code %d != %d", resp.StatusCode, flags.Provider.ExpectedStatusCode)
-	}
-	return
+	return unhappyTokens, fmt.Errorf("could not determine provider")
 }
 
 type failedChecksError []string
