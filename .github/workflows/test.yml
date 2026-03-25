@@ -25,8 +25,7 @@ jobs:
           FERMYBOT_GH_TEST_TOKEN: ${{ secrets.FERMYBOT_GH_TEST_TOKEN }}
           FERMYBOT_FWF_TEST_TOKEN: ${{ secrets.FERMYBOT_FWF_TEST_TOKEN }}
         run: |
-          ./auth-token-monitor --token-env-vars FERMYBOT_GH_TEST_TOKEN,GITHUB_TOKEN --expiration-threshold=0
-          ./auth-token-monitor --token-env-vars FERMYBOT_FWF_TEST_TOKEN --expiration-threshold=0 --provider fwf
+          ./auth-token-monitor --token-env-vars FERMYBOT_GH_TEST_TOKEN,FERMYBOT_FWF_TEST_TOKEN,GITHUB_TOKEN --expiration-threshold=0
 
       - name: Check Test Token expiring in next year
         env:
@@ -47,5 +46,4 @@ jobs:
           FERMYBOT_GH_TEST_TOKEN: ${{ secrets.FERMYBOT_GH_TEST_TOKEN }}
           FERMYBOT_FWF_TEST_TOKEN: ${{ secrets.FERMYBOT_FWF_TEST_TOKEN }}
         run: |
-          ./auth-token-monitor --token-env-vars FERMYBOT_GH_TEST_TOKEN --expiration-threshold=720h
-          ./auth-token-monitor --token-env-vars FERMYBOT_FWF_TEST_TOKEN --expiration-threshold=720h --provider fwf
+          ./auth-token-monitor --token-env-vars FERMYBOT_GH_TEST_TOKEN,FERMYBOT_FWF_TEST_TOKEN --expiration-threshold=720h

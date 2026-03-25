@@ -5,6 +5,8 @@ Currently supported providers:
  - `fwf` : [Fermyon Wasm Functions](https://www.fermyon.com/wasm-functions)
  - `linode` : [Linode](https://techdocs.akamai.com/linode-api/reference/get-personal-access-tokens)
 
+The provider will be auto-detected for each provided token.
+
 # Usage
 
 ## GitHub
@@ -35,7 +37,7 @@ Here we assume `TOKEN` in the shell environment holds the value of a FwF auth to
 e.g. procured via `spin aka auth tokens create --name mytoken`:
 
 ```console
-$ ./auth-token-monitor --token-env-vars TOKEN --provider fwf
+$ ./auth-token-monitor --token-env-vars TOKEN
 Checking "TOKEN" with provider "fwf"...
 Token expiration: 2026-02-14 00:04:38.312316 +0000 UTC (15.1 days)
 ```
@@ -48,7 +50,7 @@ API. It checks the expiration of all tokens returned by the API, not just the
 token used to authenticate.
 
 ```console
-$ LINODE_TOKEN="<your linode personal access token>" auth-token-monitor --provider linode --token-env-vars LINODE_TOKEN
+$ LINODE_TOKEN="<your linode personal access token>" auth-token-monitor --token-env-vars LINODE_TOKEN
 Checking "LINODE_TOKEN" with provider "linode"...
 Found 3 Linode personal access token(s)
   [my-cli-token] (id=123456): expiration: 2026-03-15T00:00:00Z (33.9 days)
@@ -64,6 +66,12 @@ exit status 1
 
 This repo publishes a lightweight container with
 [`ko`](https://github.com/ko-build/ko).
+
+You can build the image locally after `ko` is installed on your system via:
+
+```bash
+KO_DOCKER_REPO=<registry>/auth-token-monitor ko build --bare
+```
 
 ## Github Actions
 
