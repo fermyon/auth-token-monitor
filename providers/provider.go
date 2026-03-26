@@ -106,7 +106,7 @@ func (p *Provider) CheckToken(ctx context.Context, cfg *config.Config, name, tok
 		fmt.Printf(" (%.1f days)\n", expirationDuration.Hours()/24)
 		if expirationDuration < cfg.ExpirationThreshold {
 			fmt.Println("WARNING: Expiring soon!")
-			unhappyTokens = append(unhappyTokens, token)
+			unhappyTokens = append(unhappyTokens, name)
 			span.SetStatus(codes.Error, "token expiring soon")
 		}
 
@@ -123,7 +123,7 @@ func (p *Provider) CheckToken(ctx context.Context, cfg *config.Config, name, tok
 		if rateLimitPercent > 50 {
 			fmt.Println("WARNING: Rate limit >50%!")
 			span.SetStatus(codes.Error, "high rate limit usage")
-			unhappyTokens = append(unhappyTokens, token)
+			unhappyTokens = append(unhappyTokens, name)
 		}
 	}
 
