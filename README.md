@@ -62,6 +62,54 @@ Error: checks failed for token(s): ci-deploy-token
 exit status 1
 ```
 
+## Tailscale
+
+The Tailscale provider uses the [tailscale v2](https://github.com/tailscale/tailscale-client-go-v2) SDK
+to call the [List and Get Keys](https://tailscale.com/api#tag/keys) APIs. The current
+default is to list (and check expiration of) *all* keys in the tailnet, assuming sufficient privileges
+of the supplied token or auth credentials.
+
+For auth credentials, the following env vars are checked:
+
+- if `TS_API_KEY` is set, this value will be used instead of the supplied token (if different) for API requests
+- if `TS_OAUTH_CLIENT_ID` and `TS_OAUTH_CLIENT_SECRET` are set, an ephemeral access token generated from the
+  OAuth credentials will be used instead of the supplied token (if different) for API requests
+- if there there are no credentials in the env, the supplied token will be used
+
+Additionally, a specific tailnet can be supplied via `TAILNET`. Otherwise, `-` is used, which represents the
+default tailnet associated with the API credential.
+
+For example:
+
+```console
+$ export TS_API_KEY='...'
+$ ./auth-token-monitor --token-env-vars TS_API_KEY
+Checking token "TS_API_KEY" with provider "tailscale"...
+No TAILNET supplied; using default tailnet associated with supplied credential
+Using TS_API_KEY for API requests
+Found 2 Tailscale key(s) in the - Tailnet
+  [test] (id=kB45wP7bzx11CNTRL): expiration: NEVER
+  [test2] (id=kVbFQqaG6F11CNTRL): expiration: 2026-03-31T18:48:44Z (1.0 days)
+    Scopes: [all all:read]
+  WARNING: Key "test2" (id=kVbFQqaG6F11CNTRL) expiring soon!
+
+Error: checks failed for token(s): test2
+
+$ unset TS_API_KEY
+$ export TS_OAUTH_CLIENT_ID='...' TS_OAUTH_CLIENT_SECRET='...'
+$ export TAILNET='mytailnet'
+$ ./auth-token-monitor --token-env-vars TS_OAUTH_CLIENT_SECRET
+Checking token "TS_OAUTH_CLIENT_SECRET" with provider "tailscale"...
+Using OAuth client to generate an access token for API requests
+Found 2 Tailscale key(s) in the mytailnet Tailnet
+  [test] (id=kB45wP7bzx11CNTRL): expiration: NEVER
+  [test2] (id=kVbFQqaG6F11CNTRL): expiration: 2026-03-31T18:48:44Z (1.0 days)
+    Scopes: [all all:read]
+  WARNING: Key "test2" (id=kVbFQqaG6F11CNTRL) expiring soon!
+
+Error: checks failed for token(s): test2
+```
+
 # Container
 
 This repo publishes a lightweight container with
