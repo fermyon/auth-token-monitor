@@ -29,9 +29,10 @@ type Provider struct {
 }
 
 var Providers = map[string]TokenChecker{
-	"github": Github,
-	"fwf":    Fwf,
-	"linode": Linode,
+	"github":    Github,
+	"fwf":       Fwf,
+	"linode":    Linode,
+	"tailscale": Tailscale,
 }
 
 type TokenChecker interface {

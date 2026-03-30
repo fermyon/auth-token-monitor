@@ -1,0 +1,148 @@
+package providers
+
+import (
+	"context"
+	"fmt"
+	"net/url"
+	"os"
+	"regexp"
+	"time"
+
+	"github.com/fermyon/auth-token-monitor/config"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+	"tailscale.com/client/tailscale/v2"
+)
+
+type TailscaleProvider struct {
+	Provider
+}
+
+var Tailscale = &TailscaleProvider{
+	Provider: Provider{
+		Name: "tailscale",
+		BaseURL: &url.URL{
+			Scheme: "https",
+			Host:   "api.tailscale.com",
+		},
+		TokenPatterns: []*regexp.Regexp{
+			// Note: there are also 'tskey-(auth|scim|webhook)-...' tokens,
+			// and indeed keys of these types will be returned when GETting all keys,
+			// but only the api or token key types have authorization to make API
+			// requests. (Also including 'client' keys for when an OAuth client key
+			// is supplied, wherein a token key will be generated during auth.)
+			regexp.MustCompile(`^tskey-(api|client|token)-[a-zA-Z0-9-]+$`),
+		},
+	},
+}
+
+func (tp *TailscaleProvider) CheckToken(ctx context.Context, cfg *config.Config, name, token string) (unhappyTokens []string, err error) {
+	if cfg.BaseURL != nil {
+		tp.BaseURL = cfg.BaseURL
+	}
+	ctx, span := otel.Tracer("").Start(ctx, fmt.Sprintf("check-%s %s", tp.Name, name))
+	defer func() {
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+	span.SetAttributes(
+		attribute.Stringer("tokmon.base_url", tp.BaseURL),
+		attribute.String("tokmon.token.name", name))
+
+	fmt.Printf("Checking token %q with provider %q...\n", name, tp.Name)
+
+	// Create a Tailscale API Client
+	tailnet := os.Getenv("TAILNET")
+	if tailnet == "" {
+		fmt.Println("No TAILNET supplied; using default tailnet associated with supplied credential")
+		tailnet = "-"
+	}
+	client := &tailscale.Client{Tailnet: tailnet, BaseURL: tp.BaseURL}
+
+	// Check env for auth mode: either OAuth client or static api key
+	if apiKey := os.Getenv("TS_API_KEY"); apiKey != "" {
+		fmt.Println("Using TS_API_KEY for API requests")
+		client.APIKey = apiKey
+	} else if clientID, clientSecret := os.Getenv("TS_OAUTH_CLIENT_ID"), os.Getenv("TS_OAUTH_CLIENT_SECRET"); clientID != "" && clientSecret != "" {
+		fmt.Println("Using OAuth client to generate an access token for API requests")
+		client.Auth = &tailscale.OAuth{
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
+		}
+	} else {
+		fmt.Println("Using the provided token for Tailscale API requests, as neither TS_API_KEY nor OAuth credentials (TS_OAUTH_CLIENT_ID, TS_OAUTH_CLIENT_SECRET) are set")
+		client.APIKey = token
+	}
+
+	// List keys, supplying all=true to list both user and tailnet keys
+	// Note: as the api mentions, the only field set for each returned key is the ID, so we'll get each key specifically below
+	// TODO: support requesting specific keys via ID by eg TS_TOKEN_IDS (comma-delim list)
+	keyIDs, err := client.Keys().List(ctx, true)
+	if err != nil {
+		return unhappyTokens, fmt.Errorf("unable to list keys: %w", err)
+	}
+
+	fmt.Printf("Found %d Tailscale key(s) in the %s Tailnet\n", len(keyIDs), client.Tailnet)
+	span.SetAttributes(attribute.Int("tokmon.tailscale.token_count", len(keyIDs)))
+	for _, keyID := range keyIDs {
+		// Note: as mentioned above, we need to issue a specific Get for each ID to populate all metadata
+		key, err := client.Keys().Get(ctx, keyID.ID)
+		if err != nil {
+			return unhappyTokens, fmt.Errorf("unable to get key with id=%s", keyID.ID)
+		}
+		// TODO: sufficient attributes? Too many?
+		// What about capabilities, scopes, tags, etc? (note: these are printed below)
+		span.AddEvent("check_tailscale_token", trace.WithAttributes(
+			attribute.String("tokmon.tailscale.key.description", key.Description),
+			attribute.String("tokmon.tailscale.key.id", key.ID),
+			attribute.String("tokmon.tailscale.key.type", key.KeyType),
+			attribute.String("tokmon.tailscale.key.userID", key.UserID),
+			attribute.String("tokmon.tailscale.key.createdAt", key.Created.String()),
+		))
+
+		if key.Expires.IsZero() {
+			fmt.Printf("  [%s] (id=%s): expiration: NEVER\n", key.Description, key.ID)
+			continue
+		} else if !key.Revoked.IsZero() {
+			// In practice, it appears these usually aren't returned by the API
+			fmt.Printf("  [%s] (id=%s): revoked\n", key.Description, key.ID)
+			continue
+		} else if key.Invalid {
+			// In practice, it appears these usually aren't returned by the API
+			fmt.Printf("  [%s] (id=%s): invalid\n", key.Description, key.ID)
+			continue
+		}
+
+		expiration := key.Expires
+		expirationDuration := time.Until(expiration)
+		fmt.Printf("  [%s] (id=%s): expiration: %s (%.1f days)\n",
+			key.Description, key.ID, expiration.Format(time.RFC3339), expirationDuration.Hours()/24)
+		printKeyMetadata(key)
+
+		if expirationDuration < cfg.ExpirationThreshold {
+			fmt.Printf("  WARNING: Key %q (id=%s) expiring soon!\n", key.Description, key.ID)
+			unhappyTokens = append(unhappyTokens, key.Description)
+			span.SetStatus(codes.Error, fmt.Sprintf("tailscale key %q (id=%s) expiring soon", key.Description, key.ID))
+		}
+	}
+
+	fmt.Println()
+	return unhappyTokens, nil
+}
+
+func printKeyMetadata(k *tailscale.Key) {
+	if len(k.Tags) > 0 {
+		fmt.Printf("    Tags: %v\n", k.Tags)
+	}
+	if len(k.Scopes) > 0 {
+		fmt.Printf("    Scopes: %v\n", k.Scopes)
+	}
+	caps := k.Capabilities.Devices.Create
+	if caps.Reusable || caps.Ephemeral || caps.Preauthorized || len(caps.Tags) > 0 {
+		fmt.Printf("    Capabilities: %+v\n", caps)
+	}
+}
