@@ -51,7 +51,9 @@ func (tp *TailscaleProvider) CheckToken(ctx context.Context, cfg *config.Config,
 	}()
 	span.SetAttributes(
 		attribute.Stringer("tokmon.base_url", tp.BaseURL),
-		attribute.String("tokmon.token.name", name))
+		attribute.String("tokmon.token.provider", tp.Name),
+		attribute.String("tokmon.token.name", name),
+	)
 
 	fmt.Printf("Checking token %q with provider %q...\n", name, tp.Name)
 

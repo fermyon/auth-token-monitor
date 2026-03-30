@@ -47,7 +47,9 @@ func (lp *LinodeProvider) CheckToken(ctx context.Context, cfg *config.Config, na
 	}()
 	span.SetAttributes(
 		attribute.Stringer("tokmon.base_url", lp.BaseURL),
-		attribute.String("tokmon.token.name", name))
+		attribute.String("tokmon.token.provider", lp.Name),
+		attribute.String("tokmon.token.name", name),
+	)
 
 	fmt.Printf("Checking token %q with provider %q...\n", name, lp.Name)
 
