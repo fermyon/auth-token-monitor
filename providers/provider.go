@@ -53,7 +53,9 @@ func (p *Provider) CheckToken(ctx context.Context, cfg *config.Config, name, tok
 	}()
 	span.SetAttributes(
 		attribute.Stringer("tokmon.base_url", p.BaseURL),
-		attribute.String("tokmon.token.name", name))
+		attribute.String("tokmon.token.provider", p.Name),
+		attribute.String("tokmon.token.name", name),
+	)
 
 	fmt.Printf("Checking token %q with provider %q...\n", name, p.Name)
 
