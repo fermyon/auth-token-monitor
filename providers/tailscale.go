@@ -8,12 +8,13 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/fermyon/auth-token-monitor/config"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"tailscale.com/client/tailscale/v2"
+
+	"github.com/fermyon/auth-token-monitor/config"
 )
 
 type TailscaleProvider struct {
@@ -115,15 +116,21 @@ func (tp *TailscaleProvider) CheckToken(ctx context.Context, cfg *config.Config,
 		fmt.Printf("  [%s] (id=%s): expiration: %s (%.1f days)\n",
 			key.Description, key.ID, expiration.Format(time.RFC3339), expirationDuration.Hours()/24)
 
-		span.AddEvent("check_tailscale_token", trace.WithAttributes(
-			attribute.String("tokmon.tailscale.key.description", key.Description),
-			attribute.String("tokmon.tailscale.key.id", key.ID),
-			attribute.String("tokmon.tailscale.key.type", key.KeyType),
-			attribute.String("tokmon.tailscale.key.userID", key.UserID),
-			attribute.String("tokmon.tailscale.key.createdAt", key.Created.String()),
+		attributes := []attribute.KeyValue{
 			attribute.String("tokmon.token.expiration", expiration.String()),
 			attribute.Float64("tokmon.token.expiration_duration", expirationDuration.Seconds()),
-		))
+		}
+		details := []TokenDetail[any]{
+			{Key: "ID", Value: key.ID},
+			{Key: "Description", Value: key.Description},
+			{Key: "Type", Value: key.KeyType},
+			{Key: "UserID", Value: key.UserID},
+			{Key: "CreatedAt", Value: key.Created},
+		}
+		attributes = append(attributes, tp.generateDetailAttributes(details...)...)
+
+		span.AddEvent("check_tailscale_token", trace.WithAttributes(attributes...))
+
 		printKeyMetadata(key)
 
 		if expirationDuration < cfg.ExpirationThreshold {
