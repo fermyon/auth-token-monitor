@@ -94,15 +94,6 @@ func (tp *TailscaleProvider) CheckToken(ctx context.Context, cfg *config.Config,
 		if err != nil {
 			return unhappyTokens, fmt.Errorf("unable to get key with id=%s", keyID.ID)
 		}
-		// TODO: sufficient attributes? Too many?
-		// What about capabilities, scopes, tags, etc? (note: these are printed below)
-		span.AddEvent("check_tailscale_token", trace.WithAttributes(
-			attribute.String("tokmon.tailscale.key.description", key.Description),
-			attribute.String("tokmon.tailscale.key.id", key.ID),
-			attribute.String("tokmon.tailscale.key.type", key.KeyType),
-			attribute.String("tokmon.tailscale.key.userID", key.UserID),
-			attribute.String("tokmon.tailscale.key.createdAt", key.Created.String()),
-		))
 
 		if key.Expires.IsZero() {
 			fmt.Printf("  [%s] (id=%s): expiration: NEVER\n", key.Description, key.ID)
@@ -121,6 +112,16 @@ func (tp *TailscaleProvider) CheckToken(ctx context.Context, cfg *config.Config,
 		expirationDuration := time.Until(expiration)
 		fmt.Printf("  [%s] (id=%s): expiration: %s (%.1f days)\n",
 			key.Description, key.ID, expiration.Format(time.RFC3339), expirationDuration.Hours()/24)
+
+		span.AddEvent("check_tailscale_token", trace.WithAttributes(
+			attribute.String("tokmon.tailscale.key.description", key.Description),
+			attribute.String("tokmon.tailscale.key.id", key.ID),
+			attribute.String("tokmon.tailscale.key.type", key.KeyType),
+			attribute.String("tokmon.tailscale.key.userID", key.UserID),
+			attribute.String("tokmon.tailscale.key.createdAt", key.Created.String()),
+			attribute.String("tokmon.token.expiration", expiration.String()),
+			attribute.Float64("tokmon.token.expiration_duration", expirationDuration.Seconds()),
+		))
 		printKeyMetadata(key)
 
 		if expirationDuration < cfg.ExpirationThreshold {
