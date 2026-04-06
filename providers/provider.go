@@ -10,13 +10,15 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
-	"github.com/fermyon/auth-token-monitor/config"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/fermyon/auth-token-monitor/config"
 )
 
 type Provider struct {
@@ -67,6 +69,7 @@ func (p *Provider) CheckToken(ctx context.Context, cfg *config.Config, name, tok
 	}
 
 	// Get user info (if permitted)
+	var tokenDetails []TokenDetail[any]
 	userURL := p.BaseURL.JoinPath("user").String()
 	_, userJSON, err := p.request(ctx, userURL, token)
 	if err == nil {
@@ -78,7 +81,7 @@ func (p *Provider) CheckToken(ctx context.Context, cfg *config.Config, name, tok
 		if err != nil {
 			return unhappyTokens, fmt.Errorf("deserializing user: %w", err)
 		}
-		span.SetAttributes(attribute.String("tokmon.token.login", user.Login))
+		tokenDetails = append(tokenDetails, TokenDetail[any]{Key: "login", Value: user.Login})
 		fmt.Printf("Token user login: %s\n", user.Login)
 	}
 
@@ -133,10 +136,13 @@ func (p *Provider) CheckToken(ctx context.Context, cfg *config.Config, name, tok
 	// Get GitHub token permissions (sometimes helpful when rotating)
 	if p.Name == Github.Name {
 		oAuthScopes := resp.Header.Get("x-oauth-scopes")
-		span.SetAttributes(attribute.String("tokmon.token.oauth_scopes", oAuthScopes))
+		tokenDetails = append(tokenDetails, TokenDetail[any]{Key: "oAuthScopes", Value: oAuthScopes})
 		fmt.Printf("OAuth scopes: %s\n", oAuthScopes)
 	}
 
+	if len(tokenDetails) > 0 {
+		span.SetAttributes(p.generateDetailAttributes(tokenDetails...)...)
+	}
 	fmt.Println()
 	return unhappyTokens, nil
 }
@@ -190,4 +196,28 @@ func (p *Provider) request(ctx context.Context, url, token string) (resp *http.R
 		return nil, nil, fmt.Errorf("got status code %d != %d", resp.StatusCode, p.ExpectedStatusCode)
 	}
 	return
+}
+
+// generates a slice of attribute.KeyValue items from the supplied TokenDetails,
+// including provider-specific attributes and a standardized, aggregated details attribute
+func (p *Provider) generateDetailAttributes(details ...TokenDetail[any]) (attributes []attribute.KeyValue) {
+	var aggregated []string
+	// Create provider-specific attributes
+	for _, detail := range details {
+		attribute := attribute.String(fmt.Sprintf("tokmon.%s.%s", p.Name, detail.Key), fmt.Sprint(detail.Value))
+		attributes = append(attributes, attribute)
+		aggregated = append(aggregated, detail.String())
+	}
+	// Include aggregated attribute
+	return append(attributes, attribute.String("tokmon.token.details", strings.Join(aggregated, "\n")))
+}
+
+// TokenDetail represents a key-value pair related to a token
+type TokenDetail[T any] struct {
+	Key   string
+	Value T
+}
+
+func (d *TokenDetail[any]) String() string {
+	return fmt.Sprintf("%s:%+v", d.Key, d.Value)
 }

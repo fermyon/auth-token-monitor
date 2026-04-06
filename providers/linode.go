@@ -73,10 +73,6 @@ func (lp *LinodeProvider) CheckToken(ctx context.Context, cfg *config.Config, na
 		if label == "" {
 			label = fmt.Sprintf("token-%d", lt.ID)
 		}
-		span.AddEvent("check_linode_token", trace.WithAttributes(
-			attribute.String("tokmon.linode.token_label", label),
-			attribute.Int("tokmon.linode.token_id", lt.ID),
-		))
 
 		if lt.Expiry == nil {
 			fmt.Printf("  [%s] (id=%d): expiration: NEVER\n", label, lt.ID)
@@ -87,6 +83,18 @@ func (lp *LinodeProvider) CheckToken(ctx context.Context, cfg *config.Config, na
 		expirationDuration := time.Until(expiration)
 		fmt.Printf("  [%s] (id=%d): expiration: %s (%.1f days)\n",
 			label, lt.ID, expiration.Format(time.RFC3339), expirationDuration.Hours()/24)
+
+		attributes := []attribute.KeyValue{
+			attribute.String("tokmon.token.expiration", expiration.String()),
+			attribute.Float64("tokmon.token.expiration_duration", expirationDuration.Seconds()),
+		}
+		details := []TokenDetail[any]{
+			{Key: "label", Value: label},
+			{Key: "ID", Value: lt.ID},
+		}
+		attributes = append(attributes, lp.generateDetailAttributes(details...)...)
+
+		span.AddEvent("check_linode_token", trace.WithAttributes(attributes...))
 
 		if expirationDuration < cfg.ExpirationThreshold {
 			fmt.Printf("  WARNING: Token %q expiring soon!\n", label)
