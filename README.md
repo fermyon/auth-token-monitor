@@ -1,9 +1,12 @@
 Monitor auth tokens for problems like upcoming expiration
 
+# Supported Providers
+
 Currently supported providers:
  - `github` : [GitHub](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
  - `fwf` : [Fermyon Wasm Functions](https://www.fermyon.com/wasm-functions)
  - `linode` : [Linode](https://techdocs.akamai.com/linode-api/reference/get-personal-access-tokens)
+ - `tailscale`: [Tailscale](https://tailscale.com/docs/reference/key-secret-management#key-and-secret-types)
 
 The provider will be auto-detected for each provided token.
 
