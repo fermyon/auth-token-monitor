@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -81,21 +82,30 @@ func (tp *TailscaleProvider) CheckToken(ctx context.Context, cfg *config.Config,
 		client.APIKey = token
 	}
 
-	// List keys, supplying all=true to list both user and tailnet keys
-	// Note: as the api mentions, the only field set for each returned key is the ID, so we'll get each key specifically below
-	// TODO: support requesting specific keys via ID by eg TS_TOKEN_IDS (comma-delim list)
-	keyIDs, err := client.Keys().List(ctx, true)
-	if err != nil {
-		return unhappyTokens, fmt.Errorf("unable to list keys: %w", err)
+	var keyIDs []string
+	keyIDsEnvVar := os.Getenv("TS_KEY_IDS")
+	if keyIDsEnvVar != "" {
+		keyIDs = strings.Split(keyIDsEnvVar, ",")
+		fmt.Printf("Filtering Tailscale key(s) to only include the following IDs: %+v\n", keyIDs)
+	} else {
+		// List keys, supplying all=true to list both user and tailnet keys
+		// Note: as the SDK mentions, the only field set for each returned key is the ID, so we'll just
+		// set keyIDs to the slice of returned IDs.
+		keys, err := client.Keys().List(ctx, true)
+		if err != nil {
+			return unhappyTokens, fmt.Errorf("unable to list keys: %w", err)
+		}
+		for _, key := range keys {
+			keyIDs = append(keyIDs, key.ID)
+		}
+		fmt.Printf("Found %d Tailscale key(s) in the %s Tailnet\n", len(keyIDs), client.Tailnet)
 	}
 
-	fmt.Printf("Found %d Tailscale key(s) in the %s Tailnet\n", len(keyIDs), client.Tailnet)
 	span.SetAttributes(attribute.Int("tokmon.tailscale.token_count", len(keyIDs)))
 	for _, keyID := range keyIDs {
-		// Note: as mentioned above, we need to issue a specific Get for each ID to populate all metadata
-		key, err := client.Keys().Get(ctx, keyID.ID)
+		key, err := client.Keys().Get(ctx, keyID)
 		if err != nil {
-			return unhappyTokens, fmt.Errorf("unable to get key with id=%s", keyID.ID)
+			return unhappyTokens, fmt.Errorf("unable to get key with id=%s", keyID)
 		}
 
 		if key.Expires.IsZero() {

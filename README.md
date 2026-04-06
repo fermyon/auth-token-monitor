@@ -65,11 +65,18 @@ exit status 1
 ## Tailscale
 
 The Tailscale provider uses the [tailscale v2](https://github.com/tailscale/tailscale-client-go-v2) SDK
-to call the [List and Get Keys](https://tailscale.com/api#tag/keys) APIs. The current
-default is to list (and check expiration of) *all* keys in the tailnet, assuming sufficient privileges
-of the supplied token or auth credentials.
+to call the [List and Get Keys](https://tailscale.com/api#tag/keys) APIs. In contrast to the other providers
+supported by this program, Tailscale does not inform on the expiration date of the key/token used to query the API.
+Rather, either all keys are returned that are accessible to the provided API token (or OAuth client;
+see [Auth Credentials](#auth-credentials) below) or a specific key can be viewed when its key ID is provided.
 
-For auth credentials, the following env vars are checked:
+Therefore, the current default is to list (and check expiration of) *all* keys in the tailnet, assuming sufficient
+privileges of the supplied token or auth credentials. However, the list of keys to be checked can be filtered
+via a list of IDs; see [Filtering](#filtering-by-key-ids) below.
+
+### Auth Credentials
+
+There are a few authentication modes for this provider:
 
 - if `TS_API_KEY` is set, this value will be used instead of the supplied token (if different) for API requests
 - if `TS_OAUTH_CLIENT_ID` and `TS_OAUTH_CLIENT_SECRET` are set, an ephemeral access token generated from the
@@ -94,7 +101,8 @@ Found 2 Tailscale key(s) in the - Tailnet
   WARNING: Key "test2" (id=kVbFQqaG6F11CNTRL) expiring soon!
 
 Error: checks failed for token(s): test2
-
+```
+```console
 $ unset TS_API_KEY
 $ export TS_OAUTH_CLIENT_ID='...' TS_OAUTH_CLIENT_SECRET='...'
 $ export TAILNET='mytailnet'
@@ -104,6 +112,27 @@ Using OAuth client to generate an access token for API requests
 Found 2 Tailscale key(s) in the mytailnet Tailnet
   [test] (id=kB45wP7bzx11CNTRL): expiration: NEVER
   [test2] (id=kVbFQqaG6F11CNTRL): expiration: 2026-03-31T18:48:44Z (1.0 days)
+    Scopes: [all all:read]
+  WARNING: Key "test2" (id=kVbFQqaG6F11CNTRL) expiring soon!
+
+Error: checks failed for token(s): test2
+```
+
+### Filtering by Key ID(s)
+
+To filter which Tailscale keys are checked, supply `TS_KEY_IDS` in the environment.
+The value should be a comma-delimited string of key ID(s).
+
+For example:
+
+```console
+$ export TS_TOKEN='...'
+$ export TS_KEY_IDS='kVbFQqaG6F11CNTRL'
+$ ./auth-token-monitor --token-env-vars TS_TOKEN
+Checking token "TS_TOKEN" with provider "tailscale"...
+Using the provided token for Tailscale API requests, as neither TS_API_KEY nor OAuth credentials (TS_OAUTH_CLIENT_ID, TS_OAUTH_CLIENT_SECRET) are set
+Filtering Tailscale key(s) to only include the following IDs: [kVbFQqaG6F11CNTRL]
+  [test2] (id=kVbFQqaG6F11CNTRL): expiration: 2026-03-31T18:48:44Z (0.9 days)
     Scopes: [all all:read]
   WARNING: Key "test2" (id=kVbFQqaG6F11CNTRL) expiring soon!
 
