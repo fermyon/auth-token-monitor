@@ -99,7 +99,10 @@ func (lp *LinodeProvider) CheckToken(ctx context.Context, cfg *config.Config, na
 		if expirationDuration < cfg.ExpirationThreshold {
 			fmt.Printf("  WARNING: Token %q expiring soon!\n", label)
 			unhappyTokens = append(unhappyTokens, label)
-			span.SetStatus(codes.Error, fmt.Sprintf("linode token %q expiring soon", label))
+		}
+
+		if len(unhappyTokens) > 0 {
+			span.SetStatus(codes.Error, fmt.Sprintf("linode token(s) expiring soon: %+v", unhappyTokens))
 		}
 	}
 

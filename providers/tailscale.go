@@ -145,9 +145,12 @@ func (tp *TailscaleProvider) CheckToken(ctx context.Context, cfg *config.Config,
 
 		if expirationDuration < cfg.ExpirationThreshold {
 			fmt.Printf("  WARNING: Key %q (id=%s) expiring soon!\n", key.Description, key.ID)
-			unhappyTokens = append(unhappyTokens, key.Description)
-			span.SetStatus(codes.Error, fmt.Sprintf("tailscale key %q (id=%s) expiring soon", key.Description, key.ID))
+			unhappyTokens = append(unhappyTokens, key.ID)
 		}
+	}
+
+	if len(unhappyTokens) > 0 {
+		span.SetStatus(codes.Error, fmt.Sprintf("tailscale key(s) expiring soon: %+v", unhappyTokens))
 	}
 
 	fmt.Println()
