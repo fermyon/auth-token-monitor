@@ -35,6 +35,7 @@ var Providers = map[string]TokenChecker{
 	"fwf":       Fwf,
 	"linode":    Linode,
 	"tailscale": Tailscale,
+	"terraform": Terraform,
 }
 
 type TokenChecker interface {
