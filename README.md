@@ -142,6 +142,33 @@ Filtering Tailscale key(s) to only include the following IDs: [kVbFQqaG6F11CNTRL
 Error: checks failed for token(s): test2
 ```
 
+## Terraform
+
+The Terraform provider uses the [go-tfe](https://github.com/hashicorp/go-tfe) SDK from Hashicorp
+to authenticate with the Terraform API and check token expiration dates. Terraform does not provide
+the expiration date of the token used for authentication with the API. Rather, tokens can be listed
+by type (e.g. org, team and user) and those that are visible to the authentication token are returned.
+
+Therefore, the current default is to list (and check expiration of) *all* tokens that the authentication
+token can access. Note that currently, we only check tokens of the same type as the authentication token,
+e.g. by org, team or user.
+
+Example:
+
+```console
+$ export TERRAFORM_TEAM_TOKEN='...'
+$ ./auth-token-monitor --token-env-vars TERRAFORM_TEAM_TOKEN
+Checking token "TERRAFORM_TEAM_TOKEN" with provider "terraform"...
+Found 3 team token(s) in the "tf-org" organization
+  [test] (id=at-ivU66CAEmzQbPi8V): expiration: 2026-04-23T21:20:46Z (-3.8 days)
+  ALERT: Terraform team token "test" (id=at-ivU66CAEmzQbPi8V) has expired!
+  [test2] (id=at-vQ9FBaL7YyMMh7uC): expiration: 2026-04-28T15:05:44Z (1.0 days)
+  WARNING: Terraform team token "test2" (id=at-vQ9FBaL7YyMMh7uC) expiring soon!
+  [test3] (id=at-yWUynyp7oFzc8sE3): expiration: 2026-05-16T21:40:05Z (19.2 days)
+
+Error: checks failed for token(s): at-ivU66CAEmzQbPi8V, at-vQ9FBaL7YyMMh7uC
+```
+
 # Container
 
 This repo publishes a lightweight container with
