@@ -136,6 +136,8 @@ func (tp *TailscaleProvider) CheckToken(ctx context.Context, cfg *config.Config,
 			{Key: "Type", Value: key.KeyType},
 			{Key: "UserID", Value: key.UserID},
 			{Key: "CreatedAt", Value: key.Created},
+			{Key: "Tags", Value: strings.Join(key.Tags, ",")},
+			{Key: "Scopes", Value: strings.Join(key.Scopes, ",")},
 		}
 		attributes = append(attributes, tp.generateDetailAttributes(details...)...)
 
