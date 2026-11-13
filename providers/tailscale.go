@@ -148,7 +148,7 @@ func (tp *TailscaleProvider) CheckToken(ctx context.Context, cfg *config.Config,
 			{Key: "Type", Value: key.KeyType},
 			{Key: "UserID", Value: key.UserID},
 			{Key: "CreatedAt", Value: key.Created},
-			{Key: "Tags", Value: strings.Join(key.Tags, ",")},
+			{Key: "Tags", Value: strings.Join(keyTags(key), ",")},
 			{Key: "Scopes", Value: strings.Join(key.Scopes, ",")},
 		}
 		attributes = append(attributes, tp.generateDetailAttributes(details...)...)
@@ -188,15 +188,27 @@ func normalizeTags(tags []string) []string {
 	return normalized
 }
 
+// keyTags returns the deduplicated tags of the given key. Both the key's own
+// tags and the tags it grants to devices are included: auth keys carry their
+// tags in the latter, while API keys and OAuth clients use the former.
+func keyTags(k *tailscale.Key) []string {
+	var tags []string
+	for _, tag := range slices.Concat(k.Tags, k.Capabilities.Devices.Create.Tags) {
+		if !slices.Contains(tags, tag) {
+			tags = append(tags, tag)
+		}
+	}
+	return tags
+}
+
 // matchingTags returns the tags of the given key that are present in tags.
-// Both the key's own tags and the tags it grants to devices are considered.
 func matchingTags(k *tailscale.Key, tags []string) []string {
 	if len(tags) == 0 {
 		return nil
 	}
 	var matched []string
-	for _, keyTag := range slices.Concat(k.Tags, k.Capabilities.Devices.Create.Tags) {
-		if slices.Contains(tags, keyTag) && !slices.Contains(matched, keyTag) {
+	for _, keyTag := range keyTags(k) {
+		if slices.Contains(tags, keyTag) {
 			matched = append(matched, keyTag)
 		}
 	}
@@ -204,8 +216,8 @@ func matchingTags(k *tailscale.Key, tags []string) []string {
 }
 
 func printKeyMetadata(k *tailscale.Key) {
-	if len(k.Tags) > 0 {
-		fmt.Printf("    Tags: %v\n", k.Tags)
+	if tags := keyTags(k); len(tags) > 0 {
+		fmt.Printf("    Tags: %v\n", tags)
 	}
 	if len(k.Scopes) > 0 {
 		fmt.Printf("    Scopes: %v\n", k.Scopes)
