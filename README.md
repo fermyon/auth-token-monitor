@@ -75,7 +75,8 @@ see [Auth Credentials](#auth-credentials) below) or a specific key can be viewed
 
 Therefore, the current default is to list (and check expiration of) *all* keys in the tailnet, assuming sufficient
 privileges of the supplied token or auth credentials. However, the list of keys to be checked can be filtered
-via a list of IDs; see [Filtering](#filtering-by-key-ids) below.
+via a list of IDs or by tag; see [Filtering by Key ID(s)](#filtering-by-key-ids) and
+[Excluding Keys by Tag](#excluding-keys-by-tag) below.
 
 ### Auth Credentials
 
@@ -138,6 +139,34 @@ Filtering Tailscale key(s) to only include the following IDs: [kVbFQqaG6F11CNTRL
   [test2] (id=kVbFQqaG6F11CNTRL): expiration: 2026-03-31T18:48:44Z (0.9 days)
     Scopes: [all all:read]
   WARNING: Key "test2" (id=kVbFQqaG6F11CNTRL) expiring soon!
+
+Error: checks failed for token(s): test2
+```
+
+### Excluding Keys by Tag
+
+Keys can also be skipped by tag via the `--tailscale-exclude-tags` flag, which takes a comma-delimited
+list of tags. Any key carrying at least one of these tags — either as one of its own tags or as a tag it
+assigns to devices — is skipped and will never be reported as expiring. The `tag:` prefix is optional,
+so `--tailscale-exclude-tags ci` and `--tailscale-exclude-tags tag:ci` are equivalent.
+
+This can be combined with `TS_KEY_IDS`; keys are first narrowed to the supplied IDs, then any with an
+excluded tag are skipped.
+
+For example:
+
+```console
+$ export TS_TOKEN='...'
+$ ./auth-token-monitor --token-env-vars TS_TOKEN --tailscale-exclude-tags ci,tag:ephemeral
+Checking token "TS_TOKEN" with provider "tailscale"...
+Using the provided token for Tailscale API requests, as neither TS_API_KEY nor OAuth credentials (TS_OAUTH_CLIENT_ID, TS_OAUTH_CLIENT_SECRET) are set
+Found 3 Tailscale key(s) in the - Tailnet
+Excluding Tailscale key(s) with any of the following tags: [tag:ci tag:ephemeral]
+  [test] (id=kB45wP7bzx11CNTRL): expiration: NEVER
+  [test2] (id=kVbFQqaG6F11CNTRL): expiration: 2026-03-31T18:48:44Z (0.9 days)
+    Scopes: [all all:read]
+  WARNING: Key "test2" (id=kVbFQqaG6F11CNTRL) expiring soon!
+  [ci-runners] (id=kQx8LmN2pR11CNTRL): skipped, excluded by tag(s): [tag:ci]
 
 Error: checks failed for token(s): test2
 ```
