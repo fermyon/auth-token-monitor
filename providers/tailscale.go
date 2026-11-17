@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -101,11 +102,22 @@ func (tp *TailscaleProvider) CheckToken(ctx context.Context, cfg *config.Config,
 		fmt.Printf("Found %d Tailscale key(s) in the %s Tailnet\n", len(keyIDs), client.Tailnet)
 	}
 
+	excludeTags := normalizeTags(cfg.TailscaleExcludeTags)
+	if len(excludeTags) > 0 {
+		fmt.Printf("Excluding Tailscale key(s) with any of the following tags: %+v\n", excludeTags)
+		span.SetAttributes(attribute.StringSlice("tokmon.tailscale.exclude_tags", excludeTags))
+	}
+
 	span.SetAttributes(attribute.Int("tokmon.tailscale.token_count", len(keyIDs)))
 	for _, keyID := range keyIDs {
 		key, err := client.Keys().Get(ctx, keyID)
 		if err != nil {
 			return unhappyTokens, fmt.Errorf("unable to get key with id=%s", keyID)
+		}
+
+		if matched := matchingTags(key, excludeTags); len(matched) > 0 {
+			fmt.Printf("  [%s] (id=%s): skipped, excluded by tag(s): %v\n", key.Description, key.ID, matched)
+			continue
 		}
 
 		if key.Expires.IsZero() {
@@ -136,7 +148,7 @@ func (tp *TailscaleProvider) CheckToken(ctx context.Context, cfg *config.Config,
 			{Key: "Type", Value: key.KeyType},
 			{Key: "UserID", Value: key.UserID},
 			{Key: "CreatedAt", Value: key.Created},
-			{Key: "Tags", Value: strings.Join(key.Tags, ",")},
+			{Key: "Tags", Value: strings.Join(keyTags(key), ",")},
 			{Key: "Scopes", Value: strings.Join(key.Scopes, ",")},
 		}
 		attributes = append(attributes, tp.generateDetailAttributes(details...)...)
@@ -159,9 +171,53 @@ func (tp *TailscaleProvider) CheckToken(ctx context.Context, cfg *config.Config,
 	return unhappyTokens, nil
 }
 
+// normalizeTags trims each supplied tag, drops empty entries and ensures every
+// tag carries Tailscale's "tag:" prefix, so that both `ci` and `tag:ci` work.
+func normalizeTags(tags []string) []string {
+	var normalized []string
+	for _, tag := range tags {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			continue
+		}
+		if !strings.HasPrefix(tag, "tag:") {
+			tag = "tag:" + tag
+		}
+		normalized = append(normalized, tag)
+	}
+	return normalized
+}
+
+// keyTags returns the deduplicated tags of the given key. Both the key's own
+// tags and the tags it grants to devices are included: auth keys carry their
+// tags in the latter, while API keys and OAuth clients use the former.
+func keyTags(k *tailscale.Key) []string {
+	var tags []string
+	for _, tag := range slices.Concat(k.Tags, k.Capabilities.Devices.Create.Tags) {
+		if !slices.Contains(tags, tag) {
+			tags = append(tags, tag)
+		}
+	}
+	return tags
+}
+
+// matchingTags returns the tags of the given key that are present in tags.
+func matchingTags(k *tailscale.Key, tags []string) []string {
+	if len(tags) == 0 {
+		return nil
+	}
+	var matched []string
+	for _, keyTag := range keyTags(k) {
+		if slices.Contains(tags, keyTag) {
+			matched = append(matched, keyTag)
+		}
+	}
+	return matched
+}
+
 func printKeyMetadata(k *tailscale.Key) {
-	if len(k.Tags) > 0 {
-		fmt.Printf("    Tags: %v\n", k.Tags)
+	if tags := keyTags(k); len(tags) > 0 {
+		fmt.Printf("    Tags: %v\n", tags)
 	}
 	if len(k.Scopes) > 0 {
 		fmt.Printf("    Scopes: %v\n", k.Scopes)

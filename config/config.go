@@ -12,6 +12,8 @@ type Config struct {
 	BaseURL             *url.URL      `name:"base-url" help:"Token API base URL (overrides provider default)"`
 	ExpirationThreshold time.Duration `name:"expiration-threshold" default:"360h" help:"Minimum duration until token expiration"`
 	Provider            string        `name:"provider" hidden:"" type:"" help:"Deprecated: the auth provider is now auto-detected from token(s)" `
+
+	TailscaleExcludeTags []string `name:"tailscale-exclude-tags" help:"Comma-separated list of tags; Tailscale keys with any of these tags are skipped"`
 }
 
 var TimestampLayouts = []string{
